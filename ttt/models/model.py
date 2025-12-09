@@ -311,7 +311,12 @@ class ModelConfig(PretrainedConfig):
             return cls.from_dict(CONFIGS[path])
         load_type, load_path = path.split("::", 1)
         if load_type == "pickle":
-            return cls.from_dict(load_pickle(load_path)["config"])
+            data = load_pickle(load_path)
+            # Check for "model_config" (used by current train.py) or "config" (legacy/alternate format)
+            if "model_config" in data:
+                return cls.from_dict(data["model_config"])
+            else:
+                return cls.from_dict(data["config"])
         elif load_type == "json":
             with open_file(load_path, "r") as fin:
                 raw_config = fin.read()

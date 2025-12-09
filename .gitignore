@@ -132,3 +132,6 @@ launcher/
 # TTT Edits
 exp
 wandb
+
+experiments/
+data_cache/
