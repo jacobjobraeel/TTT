@@ -432,6 +432,8 @@ def main(argv):
                 eval_metric_list.append(eval_metrics)
 
             val_loss_avg = average_metrics(process_allgather(eval_metric_list))["eval_loss"].item()
+            if master_process:
+                wandb.log({"eval/loss": val_loss_avg})
             master_print(f"Eval Loss: {val_loss_avg:.4f}")
             exit(0)
 
