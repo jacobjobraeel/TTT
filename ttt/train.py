@@ -11,6 +11,7 @@ from jax.tree_util import tree_map
 from jax.experimental.pjit import pjit
 from jax.sharding import PartitionSpec as PS
 from jax.experimental.multihost_utils import process_allgather
+import flax
 from flax.training.train_state import TrainState
 from flax.traverse_util import flatten_dict
 
@@ -318,7 +319,7 @@ def initialize_or_resume(
     if train_state is None and restored_params is None:
         train_state = sharded_init_fn(next_rng())
     elif train_state is None and restored_params is not None:
-        train_state = sharded_create_trainstate_from_params(restored_params)
+        train_state = sharded_create_trainstate_from_params(flax.core.unfreeze(restored_params))
         del restored_params
 
     return start_step, train_state, train_loader

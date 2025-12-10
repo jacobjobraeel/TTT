@@ -13,6 +13,10 @@ EXP_DIR="./experiments"
 mkdir -p ${EXP_DIR}/${EXP_NAME}
 chmod -R 777 ${EXP_DIR}/${EXP_NAME} 2>/dev/null || true
 
+# Use platform allocator to avoid memory fragmentation and preallocation issues
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+
 python3 -m ttt.train \
         --mesh_dim='!-1,1,1' \
         --dtype='fp32' \

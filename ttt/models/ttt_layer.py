@@ -216,7 +216,7 @@ class TTTBase(nn.Module):
             lambda x, p: self.learnable_ttt_lr.apply({"params": p}, x), axis_name="head", in_axes=[None, 0], out_axes=1
         )(X, self.learnable_ttt_lr_params)
         learnable_ttt_lr = nn.sigmoid(learnable_ttt_lr)
-        learnable_ttt_lr = learnable_ttt_lr.transpose(0, 1, 2, 4, 3)
+        # learnable_ttt_lr = learnable_ttt_lr.transpose(0, 1, 2, 4, 3)
 
         token_idx = self.learnable_token_idx + self.token_idx
         token_idx = jnp.clip(token_idx, a_min=0.0)
