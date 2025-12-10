@@ -34,6 +34,7 @@ from ttt.infra.jax_utils import (
     with_sharding_constraint,
     master_print,
     log_ttt_stats,
+    log_gradient_norm_heatmap,
 )
 
 
@@ -435,6 +436,13 @@ def main(argv):
             val_loader = data_module.val_dataloader()
             eval_metric_list = []
             
+            # Calculate and log Efficiency Metric
+            total_layers = model_config.num_hidden_layers
+            frozen_count = len(model_config.frozen_layers) if model_config.frozen_layers else 0
+            active_layer_fraction = (total_layers - frozen_count) / total_layers
+            if master_process:
+                 wandb.log({"efficiency/active_layer_fraction": active_layer_fraction}, step=0)
+
             step = 0
             for eval_batch in tqdm(val_loader, disable=not master_process):
                 step += 1
@@ -450,15 +458,39 @@ def main(argv):
                     and model_config.seq_modeling_block != "self_attention"
                 )
                 if master_process and output_ttt_stats:
+                    all_layer_grad_norms = []
                     for layer in range(len(ttt_stats)):
                         ttt_stats_layer = process_allgather(ttt_stats[layer])
                         n_mini_batch = len(ttt_stats_layer[0])
                         x_axis = [model_config.mini_batch_size * i for i in range(1, n_mini_batch + 1)]
-                        log_ttt_stats(layer, ttt_stats_layer, x_axis, step)
+                        # log_ttt_stats(layer, ttt_stats_layer, x_axis, step)
+                        
+                        # Collect Grad Norms for Heatmap
+                        grad_norm_t = jax.device_get(ttt_stats_layer[4])
+                        
+                        ttt_loss_mse_init = jax.device_get(ttt_stats_layer[1])
+                        ttt_loss_mse_step_1 = jax.device_get(ttt_stats_layer[3])
+                        
+                        wandb.log({
+                            f"layers/layer_{layer}/grad_norm_mean": grad_norm_t.mean(),
+                            f"layers/layer_{layer}/loss_init_mean": ttt_loss_mse_init.mean(),
+                            f"layers/layer_{layer}/loss_final_mean": ttt_loss_mse_step_1.mean(),
+                        }, step=step)
+
+                        # Average over mini-batch dimension (Time)
+                        grad_norm_t = grad_norm_t.mean(axis=-1)
+                        all_layer_grad_norms.append(grad_norm_t)
+
+                    if len(all_layer_grad_norms) > 0:
+                        log_gradient_norm_heatmap(all_layer_grad_norms, x_axis, step)
 
             val_loss_avg = average_metrics(process_allgather(eval_metric_list))["eval_loss"].item()
             if master_process:
-                wandb.log({"eval/loss": val_loss_avg})
+                wandb.log({
+                    "eval/loss": val_loss_avg,
+                    "summary/final_eval_loss": val_loss_avg,
+                    "summary/active_layer_fraction": active_layer_fraction
+                })
             master_print(f"Eval Loss: {val_loss_avg:.4f}")
             exit(0)
 
@@ -513,7 +545,11 @@ def main(argv):
             if master_process:
                 wandb.log(
                     {
-                        "Train Loss": loss.item(),
+                        "performance/train_loss": loss.item(),
+                        "performance/perplexity": jnp.exp(loss.item()),
+                        "gradients/global_norm": grads_norm.item(),
+                        "performance/learning_rate": learning_rate.item(),
+                        "Train Loss": loss.item(), # Keep original for compatibility
                         "Gradient Norm": grads_norm.item(),
                         "Learning Rate": learning_rate.item(),
                     },
@@ -521,11 +557,30 @@ def main(argv):
                 )
 
                 if output_ttt_stats:
+                    all_layer_grad_norms = []
                     for layer in range(len(ttt_stats)):
                         ttt_stats_layer = process_allgather(ttt_stats[layer])
                         n_mini_batch = len(ttt_stats_layer[0])
                         x_axis = [model_config.mini_batch_size * i for i in range(1, n_mini_batch + 1)]
-                        log_ttt_stats(layer, ttt_stats_layer, x_axis, step)
+                        # log_ttt_stats(layer, ttt_stats_layer, x_axis, step)
+                        
+                        # Collect Grad Norms for Heatmap
+                        grad_norm_t = jax.device_get(ttt_stats_layer[4])
+                        
+                        ttt_loss_mse_init = jax.device_get(ttt_stats_layer[1])
+                        ttt_loss_mse_step_1 = jax.device_get(ttt_stats_layer[3])
+                        
+                        wandb.log({
+                            f"layers/layer_{layer}/grad_norm_mean": grad_norm_t.mean(),
+                            f"layers/layer_{layer}/loss_init_mean": ttt_loss_mse_init.mean(),
+                            f"layers/layer_{layer}/loss_final_mean": ttt_loss_mse_step_1.mean(),
+                        }, step=step)
+
+                        grad_norm_t = grad_norm_t.mean(axis=-1)
+                        all_layer_grad_norms.append(grad_norm_t)
+                    
+                    if len(all_layer_grad_norms) > 0:
+                        log_gradient_norm_heatmap(all_layer_grad_norms, x_axis, step)
 
             if (FLAGS.save_checkpoint_freq > 0 and step % FLAGS.save_checkpoint_freq == 0) or (
                 step == FLAGS.total_steps

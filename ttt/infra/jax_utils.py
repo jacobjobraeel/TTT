@@ -438,3 +438,31 @@ def log_ttt_stats(layer, ttt_stats_layer, x_axis, step):
     ax_grad.legend()
     log_plot(fig_grad, f"Layer {layer + 1} Gradient Norm", step)
     plt.close()
+
+
+def log_gradient_norm_heatmap(grad_norms_all_layers, x_axis, step):
+    """
+    Logs gradient norms as a WandB Table.
+    grad_norms_all_layers: List of arrays, where each array is the grad norm for a layer.
+                           Shape of each array: (n_mini_batch,)
+    """
+    # Create data for WandB Table
+    # Columns: Layer, Time, Gradient Norm
+    table_data = []
+    
+    for layer_idx, layer_grads in enumerate(grad_norms_all_layers):
+        # layer_grads is 1D array of shape (n_mini_batch,)
+        for t_idx, grad_norm in enumerate(layer_grads):
+            time_step = x_axis[t_idx]
+            # Convert to standard python types for JSON serialization
+            table_data.append([
+                layer_idx, 
+                time_step, 
+                float(grad_norm)
+            ])
+            
+    # Create the Table
+    table = wandb.Table(columns=["Layer", "Time", "Gradient Norm"], data=table_data)
+    
+    # Log the Table (raw data)
+    wandb.log({"gradients/grad_norm_table": table}, step=step)

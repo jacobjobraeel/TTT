@@ -135,3 +135,5 @@ wandb
 
 experiments/
 data_cache/
+data/
+*.npy
