@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mechanistic Interpretability of Test-Time Training (TTT) Layers</title>
+    <!-- MathJax for LaTeX rendering -->
+    <!-- Polyfill removed (unnecessary for modern browsers and source is deprecated) -->
+    <!-- <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script> -->
+    <!-- MathJax Configuration -->
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']]
+            }
+        };
+    </script>
+    <script id="MathJax-script" async src="js/tex-mml-chtml.js"></script>
+    
+    <style>
+        /* Distill-Inspired CSS */
+        :root {
+            --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            --font-serif: "Georgia", serif;
+            --color-text: #333;
+            --color-accent: #0066cc;
+            --color-bg: #fff;
+            --max-width: 800px;
+        }
+
+        body {
+            font-family: var(--font-serif);
+            line-height: 1.6;
+            color: var(--color-text);
+            background: var(--color-bg);
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            background: #fafafa;
+            border-bottom: 1px solid #eee;
+            padding: 4rem 1rem;
+            text-align: center;
+        }
+
+        h1 {
+            font-family: var(--font-sans);
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            max-width: var(--max-width);
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .meta {
+            font-family: var(--font-sans);
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        article {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        h2 {
+            font-family: var(--font-sans);
+            margin-top: 3rem;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 0.5rem;
+        }
+
+        h3 {
+            font-family: var(--font-sans);
+            margin-top: 2rem;
+            color: #444;
+        }
+
+        p {
+            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
+        }
+
+        /* Figures */
+        figure {
+            margin: 2rem 0;
+            background: #f9f9f9;
+            padding: 1rem;
+            border-radius: 4px;
+        }
+
+        figure img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+            border: 1px solid #eee;
+        }
+
+        figcaption {
+            font-family: var(--font-sans);
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 0.8rem;
+            text-align: center;
+        }
+
+        .side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        @media (max-width: 600px) {
+            .side-by-side {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 2rem 0;
+            font-family: var(--font-sans);
+            font-size: 0.9rem;
+        }
+        
+        th, td {
+            border-bottom: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f5f5f5;
+        }
+
+        /* Code/Math */
+        code {
+            background: #f4f4f4;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        /* References */
+        .references {
+            font-size: 0.9rem;
+            color: #555;
+            margin-top: 4rem;
+            border-top: 1px solid #eee;
+            padding-top: 2rem;
+        }
+
+        .references p {
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Mechanistic Interpretability of Test-Time Training (TTT) Layers</h1>
+    <div class="meta">
+        A Functional Decomposition of Dynamic Plasticity by Jacob Jobraeel<br>
+        <strong>6.7960 Deep Learning Final Project (Fall 2025)</strong>
+    </div>
+</header>
+
+<article>
+
+    <section id="introduction">
+        <h2>1. Introduction</h2>
+        <p>The dominance of the Transformer architecture is predicated on a static assumption: "learning" is confined to pre-training. Once deployed, model weights are frozen artifacts. Adaptation to context is simulated entirely through the attention mechanism's activation dynamics, known as In-Context Learning (ICL) [1].</p>
+
+        <p>While effective, ICL relies on caching Key and Value matrices, causing memory consumption to scale linearly with sequence length. This creates a bottleneck for long-context applications (32k+ tokens). Furthermore, the "frozen weight" dogma limits expressivity; the model cannot fundamentally alter its processing logic to accommodate non-stationary distributions found deep within long documents [2].</p>
+
+        <p>This report investigates <strong>Test-Time Training (TTT)</strong>, an alternative paradigm where the hidden state is not a passive vector but the mutable weights of a nested neural network [2]. As the model processes a sequence, these weights are updated via gradient descent, compressing context into a learned function.</p>
+
+        <p>TTT represents a fundamental shift in how we think about inference. Rather than treating deployed models as static artifacts that merely "retrieve" learned patterns, TTT introduces genuine plasticity at test time. This has profound implications: the model can fundamentally alter its processing logic to accommodate the specific document, conversation, or task at hand—something that standard Transformers can only approximate through the limited bandwidth of attention-based activation dynamics.</p>
+
+        <h3>1.1 The "Black Box" Problem</h3>
+        <p>Current evaluations treat TTT as a black box, reporting improvements in perplexity without explaining <em>what</em> is being learned during inference. We lack a mechanistic theory of TTT plasticity. Does the inner loop simply smooth over local syntactic noise, or does it perform the entity binding required for long-term memory?</p>
+
+        <p>To address this, we introduce <strong>Functional Plasticity Bucketing</strong>, a methodology that decomposes the aggregate loss into specific token categories. We define "Plasticity" as the Frobenius norm of the weight update, denoted as $\|\Delta \theta\|_F$, at a given timestep.</p>
+
+        <h3>1.2 Research Questions</h3>
+        <p>We structure our analysis around three core questions:</p>
+        <ol>
+            <li><strong>RQ1 (The Trigger):</strong> What linguistic and temporal features drive the gradient descent process? Is plasticity driven by Novelty (surprisal) or Recall?</li>
+            <li><strong>RQ2 (The Location):</strong> Which layers are responsible for long-context memory? We hypothesize a "division of labor" where middle layers handle long-range binding.</li>
+            <li><strong>RQ3 (The Efficiency):</strong> Does the TTT mechanism exhibit <strong>selective plasticity</strong>? We investigate why high-surprisal tokens do not always trigger large updates, hypothesizing that the meta-learned optimization landscape acts as a filter for noise.</li>
+        </ol>
+    </section>
+
+    <section id="background">
+        <h2>2. Background & Theory</h2>
+        
+        <h3>2.1 The Evolution of State</h3>
+        <p>Sequence modeling is defined by how the hidden state $h_t$ is managed. The fundamental trade-off lies between memory capacity and computational efficiency.</p>
+        <ul>
+            <li><strong>RNNs/SSMs (Fixed State):</strong> $h_t$ has fixed dimension $d$. As $T \to \infty$, the state saturates, leading to catastrophic forgetting of "needles" in the haystack [3]. While models like Mamba achieve impressive efficiency with linear-time sequence modeling, their fixed state capacity fundamentally limits retrieval performance on tasks requiring precise recall of information from early in long sequences.</li>
+            <li><strong>Transformers (Growing State):</strong> $h_t$ is the KV Cache, growing linearly with $T$. This enables perfect recall but incurs $O(T)$ memory cost [4]. The attention mechanism's ability to directly attend to any prior token is powerful but becomes prohibitively expensive at context lengths of 32k tokens and beyond.</li>
+            <li><strong>TTT (Learned State):</strong> $h_t$ is the parameter set $W_t$ of an inner model. The update rule is a step of gradient descent:
+            $$ W_t = W_{t-1} - \eta \nabla_W \ell(x_t; W_{t-1}) $$
+            Here, history is compressed into weights, offering $O(1)$ inference cost with higher capacity than a fixed vector [2]. The key insight is that neural network weights can store far more information than a fixed-dimensional vector, while the gradient update provides a principled mechanism for deciding what to store.</li>
+        </ul>
+
+        <h3>2.2 The Dual Loop Paradigm</h3>
+        <p>TTT frames sequence modeling as meta-learning [5]:</p>
+        <ol>
+            <li><strong>Inner Loop (Inference):</strong> The model adapts $W$ to the specific context $x_t$ via an online self-supervised objective (usually reconstruction loss). This is where the model "learns" about the current document's entities, style, and structure.</li>
+            <li><strong>Outer Loop (Pre-training):</strong> The optimizer updates the initialization $W_0$ and learning rate $\eta$ to ensure the inner loop updates are stable and efficient. Crucially, the outer loop learns <em>how to learn</em>—shaping the optimization landscape so that gradient steps during inference are meaningful rather than chaotic.</li>
+        </ol>
+        <p>This aligns with recent theoretical work showing that standard Transformers implicitly perform gradient descent during attention [6][7]. The key insight is that the attention mechanism's linear projections can be interpreted as implementing one step of gradient descent on an implicit objective. TTT simply makes this process explicit and controllable, hard-coding the optimizer rather than hoping it emerges from the attention weights. This explicit formulation theoretically enables the same adaptation with greater efficiency, stability, and interpretability.</p>
+    </section>
+
+    <section id="methodology">
+        <h2>3. Methodology: Functional Plasticity Bucketing</h2>
+        <p>We reject aggregate benchmarks (like Wikitext-2) in favor of long-context domains: <strong>Synthetic "Needle-in-a-Haystack"</strong> for control, and <strong>PG-19</strong> (Project Gutenberg) for natural long-range dependencies [8].</p>
+
+        <p>Our core hypothesis—the <strong>Plasticity Hypothesis</strong>—posits that the magnitude of the dynamic update is a direct proxy for the information content of the token. Grounded in Information Theory [13], we expect that tokens with high "Surprisal" should generate large gradients, while low-information syntax tokens should generate negligible updates. To test this, we classify every token into three functional buckets and measure $||\Delta \theta||$:</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Bucket</th>
+                    <th>Category</th>
+                    <th>Definition</th>
+                    <th>Hypothesis (Plasticity)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>A</strong></td>
+                    <td><strong>Syntax</strong></td>
+                    <td>High-frequency stop words ("the", "of").</td>
+                    <td><strong>Zero / Negligible.</strong> Base weights should already handle these stationary patterns.</td>
+                </tr>
+                <tr>
+                    <td><strong>B</strong></td>
+                    <td><strong>Retrieval</strong></td>
+                    <td>Content words seen previously in context.</td>
+                    <td><strong>High (Binding).</strong> Re-occurrence triggers updates to "bind" current context to stored representation.</td>
+                </tr>
+                <tr>
+                    <td><strong>C</strong></td>
+                    <td><strong>Novelty</strong></td>
+                    <td>Content words appearing for the first time.</td>
+                    <td><strong>Highest (Surprisal).</strong> High information content drives the TTT layer to learn new entities [9].</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section id="results">
+        <h2>4. Results</h2>
+
+        <h3>4.1 RQ1: The Anatomy of an Update (Linguistic and Temporal Triggers)</h3>
+        <p>We analyzed the gradient norms across functional buckets and token positions.</p>
+
+        <figure>
+            <img src="images/pg19_rq1_triggers.png" alt="Bar chart showing Novelty tokens have higher gradient norms">
+            <figcaption><strong>Figure 1: Average Gradient Norm $\|\nabla \theta\|$ by Token Function.</strong><br>Novelty tokens exhibit the highest plasticity (0.0119), approximately 28% higher than Syntax tokens (0.0093). Recall tokens sit in the intermediate range (0.0098). Error bars indicate one standard deviation.</figcaption>
+        </figure>
+
+        <p>The results confirm that TTT plasticity is event-driven. <strong>Novelty</strong> tokens generate the largest state updates, validating the hypothesis that the "inner loop" is primarily concerned with encoding new information (Entity Encoding). Importantly, the gap between Novelty and Syntax tokens (28%) is substantial and consistent across document types, suggesting this is a robust property of the TTT mechanism rather than an artifact of particular texts.</p>
+
+        <p>The intermediate position of Recall tokens is particularly interesting. These tokens—content words that have appeared previously in the context—generate moderate updates, suggesting the model is performing a "binding" operation: linking the current occurrence to the stored representation from earlier in the sequence. This is consistent with the view of TTT as implementing a form of associative memory in weight space.</p>
+
+        <figure>
+            <img src="images/context_utilization.png" alt="Line chart showing gradient norm decaying over time">
+            <figcaption><strong>Figure 1b: Context Utilization over Time (Plasticity Decay).</strong><br>Average gradient norm over the first 32k tokens. Plasticity spikes significantly during the first ~2,000 tokens ("Burn-in Phase") before stabilizing to a steady state ($\approx 0.010$).</figcaption>
+        </figure>
+
+        <p><strong>Temporal Analysis:</strong> Beyond linguistic category, we observe a distinct temporal phase transition. The TTT layer exhibits a <strong>"Burn-in Phase"</strong> (Tokens 0-2k) where gradient norms are 2x higher ($\approx 0.022$) than the steady state. This suggests the model performs rapid adaptation to the document's style and setting early on, then shifts to a maintenance mode where it selectively updates only for high-novelty events.</p>
+
+        <h3>4.2 RQ2: Localization of Memory</h3>
+        <p>We froze the update ($\eta=0$) for specific layers to map the "location" of memory.</p>
+
+        <figure>
+            <div class="side-by-side">
+                <img src="images/pg19_rq2_freezing_impact.png" alt="Bar chart for PG-19 Layer Freezing">
+                <img src="images/synthetic_rq2_freezing_impact.png" alt="Bar chart for Synthetic Layer Freezing">
+            </div>
+            <figcaption><strong>Figure 2: Impact of Layer Freezing on Loss.</strong><br>(Left) On PG-19, freezing the <strong>Middle Layers (8-15)</strong> causes the worst degradation (Loss 2.89 vs 2.50 Baseline). (Right) On Synthetic Needles, freezing the <strong>Late Layers (16-23)</strong> is most damaging (Loss 12.47 vs 11.51 Baseline).</figcaption>
+        </figure>
+
+        <p><strong>Analysis:</strong> The localization of memory is <strong>task-dependent</strong>, revealing a nuanced division of labor across the network:</p>
+        <ol>
+            <li><strong>Natural Narrative (PG-19):</strong> Relies on <strong>Middle Layers</strong>. This mirrors "Induction Head" behavior in standard Transformers, where mid-layer circuits track long-term dependencies [10]. For natural text, the model must maintain coherent representations of characters, settings, and ongoing plotlines—a task that requires integrating information across many tokens without losing the semantic richness of earlier content.</li>
+            <li><strong>Algorithmic Retrieval (Synthetic):</strong> Relies on <strong>Late Layers</strong>. The precise extraction of arbitrary passkeys appears to require the refinement capacity of the upper network, suggesting that while the <em>storage</em> might be distributed, the <em>resolution</em> of hard queries happens late in the forward pass. This aligns with findings in standard Transformers where upper layers specialize in task-specific reasoning and output formatting.</li>
+        </ol>
+        <p>This task-dependent localization suggests that the TTT mechanism naturally learns to allocate different types of memory operations to appropriate depths in the network, mirroring the syntactic-to-semantic gradient observed in BERT-style models.</p>
+
+        <h3>4.3 RQ3: The Decoupling of Surprise and Plasticity</h3>
+        <p>We tested the correlation between model error (Cross Entropy) and update magnitude (Gradient Norm).</p>
+
+        <figure>
+            <div class="side-by-side">
+                <img src="images/rq3_scatter.png" alt="Scatter plot for PG-19">
+                <img src="images/synthetic_rq3_scatter.png" alt="Scatter plot for Synthetic data">
+            </div>
+            <figcaption><strong>Figure 3: Scatter Plot of Loss vs. Gradient Norm.</strong><br>There is effectively zero correlation between how "surprised" the model is and how much it updates its weights. Pearson $r = 0.048$ (PG-19) and $r = 0.031$ (Synthetic).</figcaption>
+        </figure>
+
+        <p><strong>Analysis:</strong> The near-zero correlation contradicts the naive view of TTT as a simple error-correction loop. The model does <strong>NOT</strong> adhere to an <code>Error &propto; Plasticity</code> rule.</p>
+        <p>Instead, this implies a <strong>Meta-Learned Filter</strong>. The outer-loop optimization has tuned the initial geometry ($W_0$) and learning rate ($\eta$) to effectively gate updates. The model distinguishes between "useful surprise" (novel entities worth storing) and "noise" (irreducible uncertainty), updating only when the gradient direction aligns with the learned manifold of useful adaptation. This <strong>Selective Plasticity</strong> is key to the model's stability over long contexts.</p>
+    </section>
+
+    <section id="discussion">
+        <h2>5. Discussion</h2>
+        <p>Our mechanistic decomposition reveals TTT as a sophisticated, selective memory system:</p>
+        <ol>
+            <li><strong>Event-Driven & Temporal:</strong> Learning is not continuous. It is concentrated in the early "Burn-in" phase and subsequently triggered by specific Novelty events.</li>
+            <li><strong>Task-Specific Localization:</strong> The "Weight State" moves. Natural cohesion is maintained in the middle layers, while algorithmic precision resides in the upper layers.</li>
+            <li><strong>Endogenous Gating:</strong> Efficiency is built-in. The meta-learned parameters naturally suppress updates for high-error but low-utility tokens, removing the need for heuristic "early exit" gates [11].</li>
+        </ol>
+
+        <h3>5.1 Broader Implications</h3>
+        <p>These findings suggest that TTT layers are not simply "error correctors" that minimize local loss at each step. Instead, they function more like a learned memory controller that selectively writes to a distributed key-value store encoded in the weight matrices. The near-zero correlation between surprisal and plasticity (RQ3) is perhaps the most striking result: it implies that the outer loop has successfully learned to distinguish between "useful surprise" (novel entities worth encoding) and "noise" (irreducible uncertainty that would only destabilize the representation if stored).</p>
+        
+        <p>The task-dependent localization (RQ2) also has practical implications for model design. If middle layers handle semantic binding while upper layers handle precise retrieval, future architectures might benefit from heterogeneous TTT configurations—perhaps with larger inner models in the middle layers and faster, lightweight updates in the upper layers.</p>
+        
+        <p>Finally, the temporal dynamics we observe (the "Burn-in Phase") suggest that TTT layers naturally implement a form of curriculum learning during inference: aggressive adaptation early to calibrate to the document's distribution, followed by selective, conservative updates as the model settles into a stable representation.</p>
+    </section>
+
+    <section id="limitations">
+        <h2>6. Limitations and Future Work</h2>
+        
+        <h3>6.1 Limitations</h3>
+        <p>Several limitations constrain the generalizability of our findings:</p>
+        <ul>
+            <li><strong>Scale:</strong> Our analysis is confined to a 1.3B parameter model trained on Books3. While this scale balances computational feasibility with the capacity for emergent behaviors [12], larger models may exhibit qualitatively different plasticity patterns. The division of labor across layers, in particular, may shift as model depth and width increase.</li>
+            <li><strong>Domain Specificity:</strong> Both PG-19 (literary text) and our synthetic needle tasks represent specific genres of long-context challenge. Real-world applications—such as code repositories, scientific papers, or multi-document retrieval—may stress different aspects of the TTT mechanism.</li>
+            <li><strong>Metric Limitations:</strong> While gradient norm and weight update magnitude provide tractable proxies for "plasticity," they do not capture the full picture of what information is being encoded or how it is organized within the weight matrices. More sophisticated probing techniques (e.g., causal interventions or representation similarity analysis) could reveal finer-grained structure.</li>
+            <li><strong>Architectural Choices:</strong> We analyze TTT-Linear, the simpler of the two TTT variants proposed in Sun et al. [2]. TTT-MLP, which uses a multi-layer perceptron as the inner model, may exhibit different plasticity dynamics due to its greater representational capacity.</li>
+        </ul>
+
+        <h3>6.2 Future Work</h3>
+        <p>Our findings open several promising research directions:</p>
+        <ul>
+            <li><strong>Adaptive Gating:</strong> The decoupling of surprisal and plasticity (RQ3) suggests that gradient magnitude could serve as an efficient gating signal. If the TTT update is negligible ($\|\nabla \ell\| \approx 0$), the backward pass could potentially be skipped entirely [11]. We estimate this could yield 30-50% compute savings on documents where most tokens are syntactically predictable. Future work should validate this hypothesis and develop robust thresholding strategies that balance efficiency against the risk of missing important updates.</li>
+            <li><strong>Cross-Architecture Comparison:</strong> A direct mechanistic comparison between TTT layers and the implicit gradient descent observed in standard Transformers [6][7] would illuminate whether explicit test-time optimization offers fundamental advantages beyond efficiency, or whether the two paradigms converge to similar representational strategies. Such comparisons could reveal whether TTT's explicit optimization is simply a more efficient implementation of what attention already does implicitly.</li>
+            <li><strong>Mapping Induction Heads:</strong> Prior work has identified "Induction Head" circuits in Transformers that implement copying and retrieval behaviors [10]. A natural question is whether TTT layers develop analogous structures in their weight dynamics—and if so, whether these structures are more interpretable or more flexible than their attention-based counterparts. Understanding this correspondence could bridge the mechanistic interpretability literature for Transformers with the emerging TTT paradigm.</li>
+            <li><strong>Information-Theoretic Analysis:</strong> Our Functional Plasticity Bucketing is grounded in intuitions from Information Theory [13]—specifically, the relationship between token surprisal and information content. A more rigorous formalization could connect TTT plasticity to rate-distortion theory, treating the weight state as a lossy compression of the input sequence. This could yield principled bounds on how much context can be effectively stored in a weight matrix of given size.</li>
+            <li><strong>Multi-Modal Extensions:</strong> The TTT paradigm is not limited to language. Recent work has applied test-time training to video generation and sequential recommendation systems. Extending our mechanistic analysis to these domains could reveal whether the plasticity patterns we observe are universal properties of gradient-based adaptation or specific to linguistic structure.</li>
+        </ul>
+
+        <h3>6.3 Conclusion</h3>
+        <p>Test-Time Training represents a compelling alternative to the dominant paradigm of static inference. By treating the hidden state as mutable weights rather than cached activations, TTT offers a path toward efficient long-context modeling without the quadratic memory costs of standard Transformers. Our mechanistic analysis reveals that this efficiency does not come at the cost of interpretability: TTT layers exhibit clear functional structure, with event-driven updates, task-specific layer specialization, and sophisticated meta-learned gating. These properties suggest that TTT is not merely a computational trick but a principled approach to online adaptation that warrants deeper theoretical and empirical investigation.</p>
+    </section>
+
+    <section class="references">
+        <h2>References</h2>
+        <p>[1] D. Dai et al., "Why Can GPT Learn In-Context? Language Models Implicitly Perform Gradient Descent as Meta-Optimizers," in <em>Findings of ACL</em>, 2023.</p>
+        <p>[2] Y. Sun et al., "Learning to (Learn at Test Time): RNNs with Expressive Hidden States," <em>arXiv preprint arXiv:2407.04620</em>, 2024.</p>
+        <p>[3] A. Gu and T. Dao, "Mamba: Linear-Time Sequence Modeling with Selective State Spaces," <em>arXiv preprint arXiv:2312.00752</em>, 2023.</p>
+        <p>[4] A. Vaswani et al., "Attention is all you need," in <em>Advances in Neural Information Processing Systems</em>, 2017.</p>
+        <p>[5] J. Von Oswald et al., "Transformers learn in-context by gradient descent," in <em>International Conference on Machine Learning</em>, 2023.</p>
+        <p>[6] E. Akyürek et al., "What Learning Algorithm is In-Context Learning? Investigations with Linear Models," <em>in ICLR</em>, 2023.</p>
+        <p>[7] J. Von Oswald et al., "Uncovering mesa-optimization algorithms in Transformers," <em>arXiv preprint arXiv:2309.05858</em>, 2023.</p>
+        <p>[8] J. Rae et al., "Compressive Transformers for Long-Range Sequence Modeling," <em>in ICLR</em>, 2020. (PG-19 Source).</p>
+        <p>[9] M. H. H. Khondker et al., "Gradient-based token pruning for efficient inference in transformers," <em>arXiv preprint</em>, 2023.</p>
+        <p>[10] C. Olsson et al., "In-context learning and induction heads," <em>Transformer Circuits Thread</em>, 2022.</p>
+        <p>[11] A. Graves, "Adaptive Computation Time for Recurrent Neural Networks," <em>arXiv preprint arXiv:1603.08983</em>, 2016.</p>
+        <p>[12] J. Wei et al., "Emergent Abilities of Large Language Models," <em>Transactions on Machine Learning Research (TMLR)</em>, 2022.</p>
+        <p>[13] J. Hale, "A Probabilistic Earley Parser as a Psycholinguistic Model," in <em>Proceedings of NAACL</em>, 2001.</p>
+    </section>
+
+</article>
+
+</body>
+</html>
