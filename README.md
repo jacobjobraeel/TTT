@@ -15,7 +15,7 @@ We investigate three core research questions:
 - **RQ2 (The Location):** Which layers are responsible for long-context memory?
 - **RQ3 (The Efficiency):** Does TTT exhibit selective plasticity, decoupling surprisal from update magnitude?
 
-For detailed results and visualizations, see ["https://jacobjobraeel.github.io/ttt-interpretability/"](blog post)
+For detailed results and visualizations, see ['https://jacobjobraeel.github.io/ttt-interpretability/'](blog post)
 ## Methodology: Functional Plasticity Bucketing
 
 We define **Plasticity** as the Frobenius norm of the weight update, denoted as $||\Delta \theta||_F$, at a given timestep. To understand what drives these updates, we classify every token into three functional buckets:
